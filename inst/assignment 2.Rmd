@@ -1,0 +1,107 @@
+---
+title: "Statistics"
+author: "Niraj Shah"
+date: "3 May 2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r thompson sampling 2a}
+ps<-c(0.6,0.4)
+
+thompson<-function(ps,N){
+as <- rep(0,N)
+rs <- rep(0,N)
+ns <- rep(0,2)
+ss <- rep(0,2)
+for(i in 1:N){ ## we assume our initial beliefs for both arms follow a Beta(1,1) distribution.
+  ranbeta1 = rbeta(n=1,1+ss[1],1+sum(as==1)-ss[1])
+  ranbeta2 = rbeta(n=1,1+ss[2],1+sum(as==2)-ss[2])
+  if(ranbeta1>ranbeta2){
+    a<-1
+  }
+  else {
+    a<-2
+  }
+r <- runif(1,min=0,max=1) < ps[a]
+ns[a] <- ns[a] + 1
+ss[a] <- ss[a] + r
+as[i] <- a
+rs[i] <- r
+}
+return(list(as=as,rs=rs))
+}
+
+## example of 50 goes, with the probability of success of arm 1 being 0.6, and the probability of success of arm 2 being 0.4
+g<-thompson(c(0.6,0.4),50)
+g
+
+
+
+```
+
+```{r edecreasing 2a}
+
+epsilon.decreasing<-function(ps,epsilon,N){ ## eplison is a vector of length N, where N is the number of goes
+
+
+as <- rep(0,N)
+rs <- rep(0,N)
+ns <- rep(0,2)
+ss <- rep(0,2)
+for(i in 1:N){
+  if (runif(1) < epsilon[i]) {
+a <- sample(2,1)
+} else {
+  a <- which.max(ss/ns)
+}
+  r <- runif(1) < ps[a]
+  ns[a] <- ns[a] + 1
+ss[a] <- ss[a] + r
+as[i] <- a
+rs[i] <- r
+}
+return(list(as=as,rs=rs))
+}
+## test 50 samples, where the  probability of success of arm 1 being 0.6, and the probability of success of arm 2 being 0.4. Let our sequence en = 1/n
+epsilon.decreasing(c(0.6,0.4),rep(1,50)/c(1:50),50)
+```
+
+2b)
+
+Lets assume that $e_{i} = min{{1,\frac{C}{n}}}$. When n is less then the floor of C, then $1 \le \frac{C}{n}$, which means for the first (floor of C) goes, according to this algorithm the person will just pick from random, independent of the amount of successes observed. After that, we have that $\frac{C}{n} \le 1$, so that after the first (floor of C) goes, it will play at random with a $\frac{C}{n}$ probabilty, and it will play according to the arm which has had the best success rate with a $1-\frac{C}{n}$ probability.
+
+(I am not sure if we need to compare how the algorithm performs for different values of c).
+
+We implement the algorithm for 50 goes, and let C = 10
+
+```{r test}
+set.seed(1)
+epsilon.decreasing(c(0.6,0.4),pmin(rep(1,50),10*rep(1,50)/c(1:50)),50)
+```
+
+We see that this is consistent with out implementation. The first 10 times we see that the algorithm makes the player play arm 1 5 times, and play arm 2 5 times, which is what we should expect if for the first 10 times the arms are chosen at random. Also, as you play more goes, you see that arm 1 gets played more often, which is expected as it has a bigger success rate.
+
+2c)
+
+Lets assume that $e_{i} = min{1,\frac{C}{n^{2}}}$. When n is less than the square root of C, then $1 \le \frac{C}{n^{2}}$, which means for the first (floor of the square root of C) goes, according to this algorithm the person will just pick from random, independent of the amount of successes observed. After that, we have that $\frac{C}{n^{2}}$ $\le$ 1, so that after the first (floor of C) goes, it will play at random with a $\frac{C}{n^{2}}$ probabilty, and it will play according to the arm which has had the best success rate with a $1 - \frac{C}{n^{2}}$ probability.
+
+We implement the algorithm for 100 goes, and let C = 100
+
+
+ 
+
+```{r test2}
+set.seed(16)
+epsilon.decreasing(c(0.6,0.4),pmin(rep(1,50),10*rep(1,50)/(c(1:50)^2)),50)
+```
+
+We see that this is consistent with our implementation. The first 10 times we see that the algorithm makes the player play arm 1 6 times, and play arm 2 4 times, which is what we should expect if for the first 10 times the arms are chosen at random. Also, as you play more goes, you see that arm 1 gets played more often, which is expected as it has a bigger success rate.
+
+2e) Thompson sampling and $\epsilon$-decreasing both are similar in the sense that in when picking what arm you will play next, your decision does get influenced by number of successes and failures you have observed previously in both arms. However, for Thompson sampling you play arm 1 according to your beleifs of its probability of being the best arm given the data seen to that point. Whereas for $\epsilon$-decreasing, there is an $\epsilon$ probabilty that you ignore previous observations and just pick at random, and there is a 1-$\epsilon$ probaiblty that you base your decision on what arm you play purely on what arm has had the best success rate so far. Note that in the $\epsilon$-decreasing algorithm, epsilon is a decreasing sequence.

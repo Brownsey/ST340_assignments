@@ -1,0 +1,607 @@
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r results='hide', message = FALSE}
+library(tidyverse)
+library(gridExtra)
+library(MASS)
+library(lasso2)
+```
+## Question 1
+
+### a)
+For this question we want to show that the unique station point of this function: 
+$f(\boldsymbol{\mu}_{1:K}) = f(u_1,...,u_K) = \sum_{i=1}^{n}\sum_{k=1}^{K}\gamma_{ik}\log p(x_i|\boldsymbol{\mu}_k)$ is given by: $\boldsymbol{\mu}_{k} = \frac{\sum_{i=1}^{n}\gamma_{ik}\boldsymbol{x}_{i}}{\sum_{i=1}^{n}\gamma_{ik}}$  
+
+This proof can be broken down into three stages. Firstly, we need to write out the function in terms of logarithms which will use both the product [1] and power [2] properties of logarithms. The next step involves calculating the derivative of the new function. From the question we are given $\mu_{kj} \in [0,1]$, but we are assuming  $\mu_{kj} \notin \{0,1\} \forall{j,k}$ since f is undefined for these values. Finally we set the derivative equal to 0 and solve the equation.
+
+$$
+\begin{aligned}
+f(\boldsymbol{\mu}_{1:K})&=\sum_{i=1}^{n}\sum_{k=1}^{K}\gamma_{ik}\log p(x_i|\boldsymbol{\mu}_k)\\
+    &=\sum_{i=1}^{n}\sum_{k=1}^{K}\gamma_{ik}\log (\prod_{j=1}^{p}\mu_{kj}^{x_{ij}}(1-\mu_{kj})^{1-x_{ij}})\\
+    &=\sum_{i=1}^{n}\sum_{k=1}^{K}\gamma_{ik}\sum_{j=1}^{p}\log (\mu_{kj}^{x_{ij}}(1-\mu_{kj})^{1-x_{ij}})                          &&\text{[1]}\\
+    &=\sum_{i=1}^{n}\sum_{k=1}^{K}\gamma_{ik}\sum_{j=1}^{p}(\log (\mu_{kj}^{x_{ij}})+\log(1-\mu_{kj})^{1-x_{kj}})
+             &&\text{[1]}\\
+    &=\sum_{i=1}^{n}\sum_{k=1}^{K}\gamma_{ik}\sum_{j=1}^{p}(x_{ij}\log(\mu_{kj})+(1-x_{ij})\log(1-\mu_{kj}))
+             &&\text{[2]}\\
+\end{aligned}
+$$
+
+Now the derivative is calculated:
+$$
+\begin{aligned}
+\frac{\partial f}{\partial \boldsymbol{\mu}_{kj}}(\boldsymbol{\mu}_{1:K}) &= \frac{\partial f}{\partial \boldsymbol{\mu}_{kj}}(\sum_{i=1}^{n}\sum_{k=1}^{K}\gamma_{ik}\sum_{j=1}^{p}(x_{ij}\log(\mu_{kj})+(1-x_{ij})\log(1-\mu_{kj}))\\
+\ &= \sum_{i=1}^{n}y_{ik} \frac{\partial f}{\partial \boldsymbol{\mu}_{kj}}(x_{ij}\log{\mu}_{kj} + (1-x_{ij})\log(1 - \mu_{kj})\\
+ \   &=\sum_{i=1}^{n}\gamma_{ik}(\frac{\boldsymbol{x}_{ij}}{\boldsymbol{\mu}_{kj}}-(1-\boldsymbol{x}_{ij})\frac{1}{1-\boldsymbol{\mu}_{kj}})\\
+    &=\frac{1}{\boldsymbol{\mu}_{kj}}\sum_{i=1}^{n}(\gamma_{ik}\boldsymbol{x}_{ij})-\frac{1}{1-\boldsymbol{\mu}_{kj}}\sum_{i=1}^{n}\gamma_{ik}(1-\boldsymbol{x}_{kj})
+\end{aligned}
+$$
+
+Setting $$\frac{\partial f}{\partial \boldsymbol{\mu}_{kj}} = 0$$ allows us to find the stationary point:
+
+$$
+\begin{aligned}
+\frac{1}{\boldsymbol{\mu}_{kj}}\sum_{i=1}^{n}\gamma_{ik}\boldsymbol{x}_{ij} &= \frac{1}{1-\boldsymbol{\mu}_{kj}}\sum_{i=1}^{n}\gamma_{ik}(1-\boldsymbol{x}_{ij})\\
+(1-\boldsymbol{\mu}_{kj})\sum_{i=1}^{n}\gamma_{ik}\boldsymbol{x}_{ij} &= \boldsymbol{\mu}_{kj}\sum_{i=1}^{n}(\gamma_{ik}-\gamma_{ik}\boldsymbol{x}_{ij})\\
+\sum_{i=1}^{n}\gamma_{ik}\boldsymbol{x}_{ij} &= \boldsymbol{\mu}_{k}\sum_{i=1}^{n}\gamma_{ik}\\
+\boldsymbol{\mu}_{kj} &= \frac{\sum_{i=1}^{n}\gamma_{ik}\boldsymbol{x}_{ij}}{\sum_{i=1}^{n}\gamma_{ik}}
+\end{aligned}
+$$
+This demonstrates that $$\boldsymbol{\mu}_{kj}$$ is a unique solution for each $\gamma_{ik}, x_{ij}$. Since we have fixed our $j$ this implies that it is true for all $j$ and hence shows that $\forall k \in \{1, ..., K\}$:
+$$\boldsymbol{\mu}_{k} = \frac{\sum_{i=1}^{n}\gamma_{ik}\boldsymbol{x}_{i}}{\sum_{i=1}^{n}\gamma_{ik}}$$ is the unique stationary point as required.
+
+### bi)
+The code for this question has been taken directly from the work involved with lab 4 and the solutions provided with this. A couple of small changes have been made. These are explained with comments. Since running this code takes about 30 minutes on my laptop, I have saved the rdata so I can read it back in quickly without the need to re-run it. This is clearly shown by comments in the code below.
+
+```{r}
+#Loading the RData
+load('20newsgroups.rdata')
+## EM algorithm for a mixture of Bernoullis
+
+## logsumexp(x) returns log(sum(exp(x))) but performs the computation in a more stable manner
+logsumexp <- function(x) return(log(sum(exp(x - max(x)))) + max(x))
+
+prob <- function(x,mu,return.log=FALSE) {
+  l <- sum(log(mu[x==1]))+sum(log(1-mu[x==0]))
+  if (return.log) {
+    return(l)
+  } else {
+    return(exp(l))
+  }
+}
+
+compute_ll <- function(xs,mus,lws,gammas) {
+  ll <- 0
+  n <- dim(xs)[1]
+  K <- dim(mus)[1]
+  for (i in 1:n) {
+    for (k in 1:K) {
+      if (gammas[i,k] > 0) {
+        ll <- ll + gammas[i,k]*(lws[k]+prob(xs[i,],mus[k,],return.log=TRUE)-log(gammas[i,k]))
+      }
+    }
+  }
+  return(ll)
+}
+
+compute_ll.direct <- function(xs,mus,lws) {
+  ll <- 0
+  n <- dim(xs)[1]
+  K <- dim(mus)[1]
+  for (i in 1:n) {
+    s <- 0
+    for (k in 1:K) {
+      s <- s + exp(lws[k])*prob(xs[i,],mus[k,])
+    }
+    ll <- ll + log(s)
+  }
+  return(ll)
+}
+
+em_mix_bernoulli <- function(xs,K,start=NULL,max.numit=Inf) {
+  p <- dim(xs)[2]
+  n <- dim(xs)[1]
+  
+  # lws is log(ws)
+  # we work with logs to keep the numbers stable
+  # start off with ws all equal
+  lws <- rep(log(1/K),K)
+  
+  if (is.null(start)) {
+    mus <- .2 + .6*xs[sample(n,K),]
+  } else {
+    mus <- start
+  }
+  gammas <- matrix(0,n,K)
+  
+  converged <- FALSE
+  numit <- 0
+  ll <- -Inf
+  #print("iteration : log-likelihood")
+  while(!converged && numit < max.numit) {
+    numit <- numit + 1
+    mus.old <- mus
+    ll.old <- ll
+    
+    ## E step - calculate gammas
+    for (i in 1:n) {
+      # the elements of lprs are log(w_k * p_k(x)) for each k in {1,...K}
+      lprs <- rep(0,K)
+      for (k in 1:K) {
+        lprs[k] <- lws[k] + prob(xs[i,],mus[k,],return.log=TRUE)
+      }
+      # gammas[i,k] = w_k * p_k(x) / sum_j {w_j * p_j(x)}
+      gammas[i,] <- exp(lprs - logsumexp(lprs))
+    }
+    
+    ll <- compute_ll(xs,mus,lws,gammas)
+    # we could also compute the log-likelihood directly below
+    # ll <- compute_ll.direct(xs,mus,lws)
+    
+    # M step - update ws and mus
+    Ns <- rep(0,K)
+    for (k in 1:K) {
+      Ns[k] <- sum(gammas[,k])
+      lws[k] <- log(Ns[k])-log(n)
+      
+      mus[k,] <- rep(0,p)
+      for (i in 1:n) {
+        mus[k,] <- mus[k,]+gammas[i,k]/Ns[k]*xs[i,]
+      }
+    }
+    # to avoid a numerical issue since each element of mus must be in [0,1]
+    mus[which(mus > 1,arr.ind=TRUE)] <- 1 - 1e-15
+   # print(paste(numit,": ",ll))
+    # we stop once the increase in the log-likelihood is "small enough"
+    if (abs(ll-ll.old) < 1e-5) converged <- TRUE
+  }
+  #adding numit to ourput in order to return last iteration as a tibble
+  return(list(lws=lws,mus=mus,gammas=gammas,ll=ll, numit = numit))
+}
+
+#Setting a seed so it is reproducible, as well as all the variables required
+set.seed(55)
+K.actual <- 4
+# Commented code below rwas an once and Rdata saved to allow for easy access
+# To save running code everytime I knit to pdf
+# out <- em_mix_bernoulli(documents, K.actual)
+# save.image(file = "1b.Rdata")
+load("1b.Rdata")
+
+
+#to save each iteration being printed to console I am just showing the last 1 here,
+#with the total iterations and the value it converged to
+tibble(iterations = out$numit, converged = out$ll)
+```
+One thing noticeable from the code as written gets close to the converged log-likelihood outcome quickly, but takes a lot of iterations to get within the convergence criteria. 
+
+### bii)
+In our example we are using K = 4, which means we have four distributions in our mixture model. First of all the clustering of the algorithm's run will be investigated. Below the weighting on each distribution will be shown below in descending order.
+```{r}
+
+tibble(Weighting = round(exp(out$lws), 2))  %>%
+  arrange(desc(Weighting))
+```
+Now, code will be written which will be used in both parts of our analysis, this creates a tibble which contains four columns as follows: 
+
+* max_gammas: the cluster based on the maximum gamma estimate.
+* newsgroups: the actual cluster. 
+* correct: Whether the estimate is correct or not, an output of 1 implies a match and 0 a non-match.
+* id: the row id, used for the x-axis in plots.
+
+```{r}
+n <- 16242
+out_gammas <- out$gammas
+maximum_gammas <- tibble(max_gammas = c(rep(0, n)), newsgroups = newsgroups)
+
+#Updating the max_gammas to reflect the most apparent for each row
+for(i in 1: n){
+  maximum_gammas$max_gammas[i] <- which.max(out_gammas[i, ])
+}
+# Tibble containing variables mentioned above
+output <- maximum_gammas %>% 
+  mutate(correct = if_else(max_gammas == newsgroups, 1, 0)) %>%
+  mutate(id = row_number())
+```
+
+The plots below will help to visualise how the actual data looked vs how our algorithm classified the documents, in each graph results will be coloured by whether they are correct or not, where 1 (blue) indicates a matching and 0 (red) indicates a non-matching.
+```{r}
+algo <- output %>%
+  ggplot(aes(y = max_gammas, x = id, colour = factor(correct))) +
+  #using alpha to allow quantity to be more easily shown
+  geom_jitter(alpha = 0.25) +
+  labs(x = "Document Number", y = "Cluster", title = "Clustering by algorithm", colour = "Matching") +
+  theme_bw()
+
+original <- output %>%
+  ggplot(aes(y = newsgroups, x = id, colour = factor(correct))) +
+  geom_jitter(alpha = 0.25) +
+  labs(x = "Document Number", y = "Cluster", title = "Clustering by actual result", colour = "Matching") +
+  theme_bw()
+grid.arrange(algo, original, ncol = 2)
+```
+From this graph it can clearly be seen how the algorithm predicts different results by cluster. It also shows how the clustering predicts different clusters with vary degrees of accuracy, as shown by the different intensities of blue to red. The clustering from our algorithm in terms of cluster number is arbitrary and as such needs to be recalibrated before we can determine the actual accuracy of our clustering algorithm. We can clearly see that cluster 4 should be cluster 1, cluster 3 should be cluster 2, cluster 2 should be cluster 4 and cluster 1 should be cluster 3. Hence, it is required to recalibrate the clusters, recalculate the correct matches and re-plot the data to show how the clustering is actually done.
+
+```{r}
+recalibrated <- output %>%
+  #Storing cluster 1 in cluster 5 whilst we move all the others
+  mutate(max_gammas = if_else(max_gammas == 1, 5, max_gammas)) %>%
+  mutate(max_gammas = if_else(max_gammas == 4, 1, max_gammas)) %>%
+  mutate(max_gammas = if_else(max_gammas == 2, 4, max_gammas)) %>%
+  mutate(max_gammas = if_else(max_gammas == 3, 2, max_gammas)) %>%
+  #Putting cluster 1 to cluster 3
+  mutate(max_gammas = if_else(max_gammas == 5, 3, max_gammas)) %>% 
+  mutate(correct = if_else(max_gammas == newsgroups, 1, 0))
+
+
+algo_1 <- recalibrated %>%
+  ggplot(aes(y = max_gammas, x = id, colour = factor(correct))) +
+  #using alpha to allow quantity to be more easily shown
+  geom_jitter(alpha = 0.25) +
+  labs(x = "Document Number", y = "Cluster", title = "Clustering by algorithm", colour = "Matching") +
+  theme_bw()
+
+original_1 <- recalibrated %>%
+  ggplot(aes(y = newsgroups, x = id, colour = factor(correct))) +
+  geom_jitter(alpha = 0.25) +
+  labs(x = "Document Number", y = "Cluster", title = "Clustering by actual result", colour = "Matching") +
+  theme_bw()
+grid.arrange(algo_1, original_1, ncol = 2)
+```
+
+Now that the data have been recalibrated and the cluster numbers are now matching, the number of classifications that the algorithm makes correctly can be calculated. This can be done by looking at the gammas. If the value in the maximum gamma column is equal to the actual gamma then it is a correct classification. In other words, the output of the code below shows the proportion of topics correctly identified. 
+```{r}
+#overall
+tibble(overall_accuracy = sum(recalibrated$correct)/n)
+#for each cluster
+recalibrated %>%
+  group_by(max_gammas) %>%
+  summarise(proportion = sum(correct), n = n()) %>%
+  mutate(proportion = round(proportion / n, 2))
+```
+In conclusion, the code outputs demonstrate the algorithm is a great improvement over a naive random assignment approach, with an overall accuracy just over 70%. This is significantly greater than the expected 25% from a naive approach. The use of the clusters created by the algorithm allows for an accurate representation of the different document types.
+
+## Question 2
+### a) 
+Most of the code for this part is taken directly from lab 5.
+Thompson_bernoulli algorithm:
+The first function, sample_arm.bernoulli, acts as a helper function that will be called in thompson.bernoulli. It calculates the number of successes (alpha) and failures (beta) of each arm and returns the arm with higher success probability of success at each iteration of the loop.
+```{r}
+sample_arm.bernoulli <- function(ns, ss) {
+  alphas <- 1 + ss
+  betas <- 1 + ns - ss 
+  
+t1 <- rbeta(1, alphas[1], betas[1]) 
+t2 <- rbeta(1, alphas[2], betas[2]) 
+if (t1 > t2) {return(1)}
+else {return(2)}
+}
+
+# the ps denotes the probabilities of each arm
+# For example you can call it using c(0.4, 0.6), to give the 
+# Probabilities specified in the question, but defining it in this manner
+# gives room for variation in the future
+thompson.bernoulli <- function(ps, n) {
+  as <- rep(0, n) #arms 
+  rs <- rep(0, n) #rewards 
+  ns <- rep(0, 2)
+  ss <- rep(0, 2) 
+  
+#This part of the code makes the choice at each step which arm to play
+for (i in 1:n) {
+  a <- sample_arm.bernoulli(ns,ss) 
+  r <- if_else(runif(1) < ps[a], 1, 0) 
+  ns[a] <- ns[a] + 1 
+  ss[a] <- ss[a] + r 
+  as[i] <- a 
+  rs[i] <- r 
+}
+  
+ rs
+}
+```
+
+
+$\epsilon-decreasing$ algorithm as based on code from the lab, where each arm will be played once to start with and then follows the epsilon strategy, where  a random arm is played with probabiliy $\epsilon$ and the best arm so far with probability $1-\epsilon$ at each iteration of the algorithm:
+```{r}
+#Same idea with ps here
+epsilon.decreasing <- function(ps,n,C,t) {
+as <- rep(0, n)
+rs <- rep(0, n)
+ns <- rep(0, 2)
+ss <- rep(0, 2) 
+
+epsilon = c()
+for(i in (1:n)){
+  epsilon[i] = min(C*(1/(i^t)), 1)
+}
+# at first, play each arm once
+for (i in 1:2) { 
+  a <- i
+  r <- runif(1) < ps[a]
+  ns[a] <- ns[a] + 1
+  ss[a] <- ss[a] + r
+  as[i] <- a
+  rs[i] <- r
+}
+# For plays after n = 2, we used the epsilon strategy
+for (i in 3:n) {
+  # with probability epsilon, pick an arm uniformly at random
+  if (runif(1) < epsilon[i]) { 
+  a <- sample(2, 1)
+  # otherwise, choose the "best arm so far".
+  } else { 
+  a <- which.max(ss/ns)
+}
+r <- if_else(runif(1) < ps[a], 1, 0) # simulate the reward
+ns[a] <- ns[a] + 1 # update the number of plays
+ss[a] <- ss[a] + r # updated number of successes
+as[i] <- a # record the arm played and the reward received
+rs[i] <- r
+}
+rs
+}
+```
+Demonstrating both algorithms work with the input requested, the expected result is that both arms will converge to 0.6 as this is the better arm, but *randomness* will play a factor and actual values will vary from this slightly.
+```{r}
+ps <- c(0.6, 0.4)
+n <- 50000
+tibble(Method = c("Thompson", "Epsilon Decreasing"), 
+       Expected_win = c(sum(thompson.bernoulli(ps, n)/n),
+                        sum(epsilon.decreasing(ps, n, C = 1, t = 1)/n)))
+```
+
+
+
+### 2b)
+For the sake of visualising the behaviour of the  $\epsilon-decreasing$ algorithm, a plotting function will be defined which takes into account the t in $Cn^{-t}$ so it can be used for part c) as well. The parameters K, ps, n , C and t will be defined in the parameters of function itself rather than hard-coded inside to allow testing of the code to be run on lower sample sizes before running the final output on large values of K and n and to allow variations of the code to be made easily. The plot will show how the average reward varies over n iterations with k runs and will hopefully show the general trend towards our best arm of 0.6. Values of C will be varied to show how this affects the speed at which our expected reward converges. The question is approached in this way for the following reason:  It has been seen in lecture that given K runs of length n where $k \in \{1, ..., K\}, n \in \mathbb{N}$, each run has an average reward which we can denote as: $$r_k^* = \frac{\sum_{k=1}^{K}r_k}{K}$$ where $r_k$ is the average reward of average of each run denoted by $r_k = \frac{\sum_{i=1}^{n}r_{ki}}{n}$. As $n \rightarrow \infty$ our average reward should converge to our best arm of 0.6.
+
+```{r epsilont, warning = FALSE}
+epsilon_test <- function(K, ps, n, C, t){
+avg_reward <- vector(mode= "numeric", length = n)
+for(i in (1:K)){
+  avg_reward <- avg_reward + (1/K) * (cumsum(epsilon.decreasing(ps, n, C, t))/(1:n))
+}
+
+tibble(avg_reward) %>%
+  mutate(n = 1:n) %>%
+  ggplot() +
+  geom_line(aes(x = n, y = avg_reward)) +
+  geom_hline(yintercept = 0.6, colour = "red") +
+  ylim(0.45, 0.65) +
+  ggtitle(paste0("Graph of C = ", C)) +
+  theme_bw()
+}
+
+K <- 50
+n <- 10000
+ps <- c(0.6, 0.4)
+p1 <- epsilon_test(K, ps, n, C = 0.01, t = 1)
+p2 <- epsilon_test(K, ps, n, C = 0.1, t = 1)
+p3 <- epsilon_test(K, ps, n, C = 1, t = 1)
+p4 <- epsilon_test(K, ps, n, C = 10, t = 1)
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+The results from this image demonstrate that the higher the value of C, the quicker it will converge towards our expected average reward of 0.6. This is because with very small values of C, the algorithm puts more weight on the first two runs and is therefore more likely to pick the wrong arm to play as the less good arm may well have a greater chance of success to start with. Although, eventually these graphs will always converge to 0.6 by the Borel-Cantelli Lemma which states both arms will be played infinitely often, which suggest with a large enough n our $r_k^*$ will always converge as eventually it will start picking the better arm.
+
+In conclusion the $\epsilon -decreasing$ strategy defined with $\epsilon_n = min\{1, Cn^{-1}\}$ will be an asymptotically optimal strategy as our graphs with low C are still increasing so will converge eventually and our graphs with a high value of C converge quickly.
+
+### 2c)
+Since the function in part b) was defined with the $t$ term, we can re-use this. Parameters K, n and ps are also previously defined in the code there. The difference between $\epsilon_n = min\{1, Cn^{-2}\}$ and $\epsilon_n = min\{1, Cn^{-1}\}$, is in this scenario the Borelli-Cantelli Lemma states that both arms will not be played infinitely often, at some point one arm will be committed to.
+```{r epsilont2}
+p_1 <- epsilon_test(K, ps, n, C = 0.01, t = 2)
+p_2 <- epsilon_test(K, ps, n, C = 0.1, t = 2)
+p_3 <- epsilon_test(K, ps, n, C = 1, t = 2)
+p_4 <- epsilon_test(K, ps, n, C = 10, t = 2)
+grid.arrange(p_1, p_2, p_3, p_4, ncol = 2)
+```
+
+From the graphs it can be seen the average reward will not necessarily converge to 0.6 as in the previous part. The reason for this is that in some cases the algorithm will *commit* to the less good arm, due to a greater weight being put on our first few plays of the game. 
+
+In conclusion the $\epsilon -decreasing$ strategy defined with $\epsilon_n = min\{1, Cn^{-2}\}$ will not be an asymptotically optimal strategy as our graphs will never converge to 0.6.
+
+### 2d)
+The first step for comparing the two methods will involve writing a Thompson test function as done in 2b) for $\epsilon-decreasing$.
+```{r}
+#Same principle as in part 2b) for the epsilon method
+thompson_test <- function(K, ps, n){
+avg_reward = vector(mode = "numeric", length = n)
+for(i in (1:K)){
+  avg_reward <- avg_reward + (1/K) * (cumsum(thompson.bernoulli(ps, n))/(1:n))
+}
+
+tibble(avg_reward) %>%
+  mutate(n = 1:n) %>%
+  ggplot() +
+  geom_line(aes(x = n, y = avg_reward)) +
+  geom_hline(yintercept = 0.6, colour = "red") +
+  ggtitle("Thompson Sampling graph") +
+  theme_bw()
+}
+thompson_test(K, ps, n)
+```
+From this graph it can be seen that the Thompson sampling method tends to converge faster to our optimum value of 0.6 than the $\epsilon-decreasing$ sampling method.
+
+Looking at the regrets as seen in lectures, where the closer the regret to zero the better. From the theory the Thompson regret line should be lower as $n \rightarrow \infty$ but randomness does play a factor:
+```{r}
+n <- 1000000
+epsilon_regret <- (1:n) * ps[1] - cumsum(epsilon.decreasing(ps, n, 1, 1))
+epsilon_rn <- epsilon_regret/log(1:n)
+thompson_regret <- (1:n) * ps[1] - cumsum(thompson.bernoulli(ps, n))
+thompson_rn <- thompson_regret/log(1:n)
+
+tibble(epsilon_rn, thompson_rn, n = c(1:n)) %>%
+  ggplot() +
+  geom_line(aes(x = n , y = epsilon_rn, colour = "Epsilon")) +
+  geom_line(aes(x = n , y = thompson_rn, colour = "Thompson")) +
+  theme_bw() + 
+  labs(title = "Comparison of Epsilon-Decreasing vs Thompson Regrets", y = "regret/log(n)") + 
+  scale_colour_manual(name = "Method", values = c(Epsilon = "blue", Thompson = "red")) +
+  geom_hline(yintercept = 0, colour = "black")
+```
+Comparing and contrasting:
+Both Thompson sampling and $\epsilon-decreasing$ with $\epsilon_n = min\{1, Cn^{-1}\}$ are asymptotically optimal sampling algorithms in terms of our average reward. They both also involve use the same number of iterations which means computing effort required for both algorithms is similar. It is known that Thompson sampling is optimal and from our regrets graph it should be seen that as $n \rightarrow \infty$ Thompson performs better than $\epsilon-decreasing$, shown in lectures (Kaufmann). This leads to the conclusion to be that since Thompson sampling converges quicker and has the lower regrets, it is the better sampling method, backing up the literature covered on the topic.
+
+## Question 3
+### a)
+The algorithm below is an implementation of k-nn regression.
+It works, in priniciple, by using an inverse weighting for each neighbour, which leads to the predictions being denoted by: $$\frac{\sum_{i=1}^{k} a_i^{-1}y^{i}}{\sum_{i=1}^{k}a_i^{-1}}$$ Firstly, an empty variable must to be initialised to store the estimates in. The input contains training and test entries, which can then be used to find the distances between them. One thing worth noting is, if the input has n test points and m training points then distance(X, Y) will return a n x m matrix, in which the $(i,j)^{th}$ entry is the distance between the $i^{th}$ test sample and $j^{th}$ training sample. So, then, for a given test entry, the algorithm simply loops through and gets the locations of the k closest training entries. It then stores the distances to their y-value and compares this with the estimate of the y-value at our test point and finally returns a list containing both the estimates and the calculated total square error associated with the predictions.
+```{r}
+knn.regression.test <- function(k,train.X,train.Y,test.X,test.Y,distances) {
+estimates <- c()
+n <- nrow(test.X)
+dist <- distances(test.X, train.X)
+
+for (x in 1:n) {
+  dist_x <- dist[x,]
+  min_locs <- c()
+    for (i in 1:k) {
+      min_dists <- which.min(dist_x)
+      min_locs <- c(min_locs, min_dists)
+      dist_x[min_dists] <- Inf
+    }
+  
+dist_x <- dist[x,]
+min_dists <- dist_x[min_locs]
+closest_neighbours <- train.Y[min_locs]
+#calculating x hat for our tse
+estimates <- c(estimates, weighted.mean(closest_neighbours, (1/min_dists)))
+}
+#calculating tse and keeping estimates too
+list(estimates = estimates, total_square_error = sum((test.Y - estimates)^2))
+}
+```
+
+### b)
+The function can now be tested on the following two toy datasets using the distances.l1 function from lab 6. To visualise the results, the total square error for different values of k will be plotted. In both examples, values of k ranging from 2 to 20 are used. All the distances and toy example setup code is taken from directly from the lab.
+```{r}
+distances.l1 <- function(X,W) {
+dists <- matrix(0, nrow = nrow(X), ncol = nrow(W))
+for (i in 1:nrow(X)) {
+for (j in 1:nrow(W)) {
+dists[i,j] = sum(abs(X[i,]-W[j,]))
+}
+}
+return(dists)
+}
+```
+Toy Dataset 1:
+
+Defining a toy_plot function to save code space for later when plotting the graphics for both toy datasets and improve code reusability, A tibble can be piped into this function to output the desired graph.
+```{r}
+toy_plot <- function(x){
+  x  %>%
+  ggplot() +
+    geom_point(aes(x = k, y = total_square_error)) +
+    theme_bw() +
+    ylab("Total Square Error") 
+}
+```
+
+```{r}
+n <- 100
+train.X <- matrix(sort(rnorm(n)),n,1)
+train.Y <- (train.X < -0.5) + train.X*(train.X>0)+rnorm(n,sd=0.03)
+test.X <- matrix(sort(rnorm(n)),n,1)
+test.Y <- (test.X < -0.5) + test.X*(test.X>0)+rnorm(n,sd=0.03)
+tot_sq_error <- c()
+for (k in 2:20) {
+  tot_sq_error <- c(tot_sq_error, knn.regression.test(k,train.X,train.Y,
+                                test.X,test.Y,distances.l1)$total_square_error)
+}
+#using our calculated total square error and piping it into our toy_plot
+#function after adding the k column for the x axis.
+tot_sq_error %>% 
+    enframe(name = NULL, value = "total_square_error") %>%
+    mutate(k = 2:20) %>%
+    toy_plot()
+```
+Toy Dataset 2:
+```{r}
+train.X <- matrix(rnorm(200),100,2)
+train.Y <- train.X[,1]
+test.X <- matrix(rnorm(100),50,2)
+test.Y <- test.X[,1]
+tot_sq_error <- c()
+for (k in 2:20) {
+  tot_sq_error <- c(tot_sq_error, knn.regression.test(k,train.X,train.Y,
+                    test.X,test.Y,distances.l1)$total_square_error)
+  }
+#Same methodology as for the first toy dataset
+tot_sq_error %>% 
+    enframe(name = NULL, value = "total_square_error") %>%
+    mutate(k = 2:20) %>%
+    toy_plot()
+```
+The results from graphs from both toy datasets demonstrate that as k increases so does the total sum of squares error in a linear fashion as would be expected.
+
+### c)
+```{r}
+distances.l2 <- function(X,W) {
+dists <- matrix(0, nrow = nrow(X), ncol = nrow(W))
+for (i in 1:nrow(X)) {
+for (j in 1:nrow(W)) {
+dists[i,j] = sum(sqrt((X[i,]-W[j,])^2))
+}
+}
+return(dists)
+}
+```
+In this example, the knn.regression.test function from part a) will be used to predict the yield in the years 1931, 1933, ..., 1961 based on the data from years 1930, 1932, ... . This will be formatted as a tibble and outputted to show the year and the prediction associated with this year.
+```{r}
+
+data(Iowa)
+train.X=as.matrix(Iowa[seq(1,33,2),1:9])
+train.Y=c(Iowa[seq(1,33,2),10])
+test.X=as.matrix(Iowa[seq(2,32,2),1:9])
+test.Y=c(Iowa[seq(2,32,2),10])
+k <- 5
+#Creating a tibble output of the years and prediction estimates.
+tibble(year = test.X[,1]) %>%
+  mutate(prediction = knn.regression.test(k,train.X,train.Y,test.X,test.Y,distances.l2)$estimates)
+```
+
+### d)
+In this question it is asked to compare the results from c) using different values of k and to compare these with the squared error calculated for both ordinary least squares regression (OLSR) and ridge regression (RR), with a $\lambda$ value of 5. Values of k between 2 and 20 will be looped through and the total square error calculated at each stage. The OLSR and RR errors can then be calculated from predicting the y values of the test data using the training data and the test data X values and squaring the difference of the observed and predicted values. This will be summarised in a plot.
+
+```{r}
+tot_sq_error <- c()
+predicts <- c()
+
+for (k in 2:20) {
+  tot_sq_error <- c(tot_sq_error,
+  knn.regression.test(k,train.X,train.Y,
+  test.X,test.Y,distances.l1)$total_square_error)
+}
+#Redefining the x variables as a tibble as otherwise
+#not in a suitable format for linear model.
+train.X <- train.X %>% 
+  as_tibble()
+test.X <- test.X %>% 
+  as_tibble()
+#calculating ordinary least squares error for graph
+ols_predicted <- predict(lm(train.Y ~ ., data = train.X), newdata = test.X)
+ols_sq_error <- sum((test.Y - ols_predicted)^2)
+
+#calculating ridge squares error for graph
+ridge_predicted <- cbind(const = 1, as.matrix(test.X)) %*% coef(lm.ridge(train.Y ~ ., data = train.X, lambda = 5)) %>%
+  as_vector()
+ridge_sq_error <- sum((test.Y - ridge_predicted)^2)
+
+#Piping the output into a form that we can use for our ggplot
+#Least Squares line is in red and ridge square in blue
+tot_sq_error %>% 
+  enframe(name = NULL, value = "total_square_error") %>%
+  mutate(k = 2:20) %>%
+  ggplot() +
+  geom_point(aes(x = k, y = total_square_error)) +
+  geom_hline(yintercept = ols_sq_error, col = "red")+
+  geom_hline(yintercept = ridge_sq_error, col = "blue")+
+  theme_bw() +
+  ggtitle("") +
+  scale_y_continuous("Total Square Error",limits =  c(1500,2000))
+```
+
+From the plot it can be observed that the ordinary least squares regression, denoted by the red line, is greater than the ridge estimate, denoted by the blue line. This is as expected due to the extra penalty applied to additional parameters in the ridge regression model, which should lead to a better model fit.  It can also be observed that *most* of the points from the knn regression lie between these two estimates. The lower the value of the total square error the *better* the model fit. From this, it is possible to conclude that RR is better than OLSR but knn is likely to perfrom better than RR in optimal scenarios of both but, in general, they are similar.
